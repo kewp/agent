@@ -40,7 +40,8 @@ const toolDefinitions: Tool[] = [
       const path = String(args.path ?? "");
       try {
         const text = await Deno.readTextFile(path);
-        return text.length > 20_000 ? text.slice(0, 20_000) + "\n\n[TRUNCATED]" : text;
+        // Truncate at 4KB to keep context manageable for the model
+        return text.length > 4_000 ? text.slice(0, 4_000) + "\n\n[TRUNCATED - file continues...]" : text;
       } catch (err) {
         if (err instanceof Deno.errors.NotFound) {
           return `ERROR: file not found: ${path}`;

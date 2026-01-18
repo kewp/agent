@@ -32,19 +32,17 @@ function extractToolCallsFromText(text: string): ToolCall[] {
   return calls;
 }
 
-const SYSTEM_PROMPT = `You are a helpful coding assistant. You have exactly 4 tools:
+const SYSTEM_PROMPT = `You are a coding assistant. Tools: calc, list_dir, read_file, search_files.
 
-1. calc - Evaluate math like "2+2"
-2. list_dir - List files. Use path "." for current directory
-3. read_file - Read a file by path
-4. search_files - Search text in files (needs ripgrep)
-
-To understand a project: first list_dir to see files, then read_file on important ones.
-Do NOT invent tools. Do NOT output JSON in your responses.`;
+RULES:
+- Maximum 2-3 tool calls total, then answer
+- Never read the same file twice
+- Be concise`;
 
 export type AgentOptions = {
   maxSteps?: number;
   verbose?: boolean;
+  timeout?: number; // Max time in ms for entire turn
   ollamaConfig?: Partial<OllamaConfig>;
 };
 
@@ -57,10 +55,17 @@ export async function runAgentTurn(
   messages: OllamaMessage[],
   options: AgentOptions = {},
 ): Promise<string> {
-  const { maxSteps = 10, verbose = false, ollamaConfig } = options;
+  const { maxSteps = 5, verbose = false, timeout = 60000, ollamaConfig } = options;
+  const startTime = Date.now();
   const tools = getToolSchemas();
 
   for (let step = 1; step <= maxSteps; step++) {
+    // Check timeout
+    if (Date.now() - startTime > timeout) {
+      console.error(yellow(`\n[timeout after ${Math.round(timeout / 1000)}s]`));
+      return "";
+    }
+
     if (verbose) {
       console.error(dim(`\n[step ${step}/${maxSteps}]`));
     }
