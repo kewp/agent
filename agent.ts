@@ -9,10 +9,20 @@
 // This loop continues until the LLM decides it has enough information to answer,
 // or we hit the maximum number of steps (to prevent infinite loops).
 
-import type { OllamaMessage, ToolCall } from "./types.ts";
+import type { OllamaMessage, ToolCall, TokenUsage } from "./types.ts";
 import type { OllamaConfig } from "./ollama.ts";
 import { chat } from "./ollama.ts";
 import { getToolSchemas, executeTool } from "./tools.ts";
+
+// Accumulate token usage across steps
+function addUsage(total: TokenUsage, step: TokenUsage | undefined): TokenUsage {
+  if (!step) return total;
+  return {
+    promptTokens: total.promptTokens + step.promptTokens,
+    completionTokens: total.completionTokens + step.completionTokens,
+    totalTokens: total.totalTokens + step.totalTokens,
+  };
+}
 
 // Some smaller models output tool calls as JSON in their text instead of using
 // the proper tool_calls field. This function tries to extract them.
@@ -49,6 +59,7 @@ export type AgentOptions = {
 // ANSI colors for terminal output
 const dim = (s: string) => `\x1b[90m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
+const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 
 // Single turn: send a message and get a response (may involve multiple LLM calls if tools are used)
 export async function runAgentTurn(
@@ -58,6 +69,7 @@ export async function runAgentTurn(
   const { maxSteps = 5, verbose = false, timeout = 60000, ollamaConfig } = options;
   const startTime = Date.now();
   const tools = getToolSchemas();
+  let totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
   for (let step = 1; step <= maxSteps; step++) {
     // Check timeout
@@ -75,6 +87,12 @@ export async function runAgentTurn(
     const result = await chat(messages, tools, ollamaConfig, (chunk) => {
       streamedContent += chunk;
     });
+
+    // Track token usage
+    totalUsage = addUsage(totalUsage, result.usage);
+    if (verbose && result.usage) {
+      console.error(dim(`[tokens: ${result.usage.promptTokens} in, ${result.usage.completionTokens} out]`));
+    }
 
     // Check for tool calls - either proper ones or extracted from text
     let toolCalls = result.toolCalls;
@@ -104,6 +122,9 @@ export async function runAgentTurn(
     if (toolCalls.length === 0) {
       if (result.content) {
         console.log(result.content);
+      }
+      if (verbose && totalUsage.totalTokens > 0) {
+        console.error(cyan(`[total: ${totalUsage.totalTokens} tokens]`));
       }
       return result.content;
     }
@@ -140,6 +161,9 @@ export async function runAgentTurn(
   }
 
   console.error(yellow(`\n[stopped after ${maxSteps} steps]`));
+  if (verbose && totalUsage.totalTokens > 0) {
+    console.error(cyan(`[total: ${totalUsage.totalTokens} tokens]`));
+  }
   return "";
 }
 

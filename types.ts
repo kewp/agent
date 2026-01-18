@@ -52,4 +52,14 @@ export type StreamChunk = {
   };
   done: boolean;
   done_reason?: string;
+  // Token counts (only present in final chunk when done=true)
+  prompt_eval_count?: number;  // Tokens in the prompt
+  eval_count?: number;         // Tokens generated
+};
+
+// Token usage statistics
+export type TokenUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 };
