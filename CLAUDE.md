@@ -25,7 +25,7 @@ deno test -A
 
 - Deno runtime
 - Ollama running locally on port 11434
-- Model `llama3.1:8b` pulled in Ollama (configurable in `ollama.ts`)
+- Model `devstral-small-2` pulled in Ollama (configurable in `ollama.ts`)
 - `rg` (ripgrep) for the search_files tool (optional)
 
 ## Architecture

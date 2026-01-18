@@ -34,7 +34,7 @@ export type OllamaConfig = {
 
 const DEFAULT_CONFIG: OllamaConfig = {
   baseUrl: "http://localhost:11434",
-  model: "llama3.1:8b",
+  model: "devstral-small-2:latest",  // Good at code + tool use
 };
 
 export type StreamResult = {
