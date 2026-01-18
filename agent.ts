@@ -9,14 +9,38 @@
 // This loop continues until the LLM decides it has enough information to answer,
 // or we hit the maximum number of steps (to prevent infinite loops).
 
-import type { OllamaMessage } from "./types.ts";
+import type { OllamaMessage, ToolCall } from "./types.ts";
 import type { OllamaConfig } from "./ollama.ts";
 import { chat } from "./ollama.ts";
 import { getToolSchemas, executeTool } from "./tools.ts";
 
-const SYSTEM_PROMPT = `You are a helpful assistant with access to tools.
-Use tools when you need information. When you have enough info, respond directly.
-For file operations, use "." to refer to the current directory.`;
+// Some smaller models output tool calls as JSON in their text instead of using
+// the proper tool_calls field. This function tries to extract them.
+function extractToolCallsFromText(text: string): ToolCall[] {
+  const calls: ToolCall[] = [];
+  // Look for JSON objects that look like tool calls
+  const jsonPattern = /\{[\s]*"name"[\s]*:[\s]*"([^"]+)"[\s]*,[\s]*"parameters"[\s]*:[\s]*(\{[^}]+\})[\s]*\}/g;
+  let match;
+  while ((match = jsonPattern.exec(text)) !== null) {
+    try {
+      const args = JSON.parse(match[2]);
+      calls.push({ function: { name: match[1], arguments: args } });
+    } catch {
+      // Invalid JSON, skip
+    }
+  }
+  return calls;
+}
+
+const SYSTEM_PROMPT = `You are a helpful coding assistant. You have exactly 4 tools:
+
+1. calc - Evaluate math like "2+2"
+2. list_dir - List files. Use path "." for current directory
+3. read_file - Read a file by path
+4. search_files - Search text in files (needs ripgrep)
+
+To understand a project: first list_dir to see files, then read_file on important ones.
+Do NOT invent tools. Do NOT output JSON in your responses.`;
 
 export type AgentOptions = {
   maxSteps?: number;
@@ -41,31 +65,53 @@ export async function runAgentTurn(
       console.error(dim(`\n[step ${step}/${maxSteps}]`));
     }
 
-    // Stream the response, printing content as it arrives
+    // Collect the response (we'll decide whether to print it after we know if there are tool calls)
+    let streamedContent = "";
     const result = await chat(messages, tools, ollamaConfig, (chunk) => {
-      Deno.stdout.writeSync(new TextEncoder().encode(chunk));
+      streamedContent += chunk;
     });
+
+    // Check for tool calls - either proper ones or extracted from text
+    let toolCalls = result.toolCalls;
+    let cleanContent = result.content;
+
+    // Fallback: some smaller models output tool calls as JSON in text
+    if (toolCalls.length === 0 && result.content) {
+      const extracted = extractToolCallsFromText(result.content);
+      if (extracted.length > 0) {
+        toolCalls = extracted;
+        // Remove the JSON from the displayed content
+        cleanContent = result.content
+          .replace(/\{[\s]*"name"[\s]*:[\s]*"[^"]+?"[\s]*,[\s]*"parameters"[\s]*:[\s]*\{[^}]+\}[\s]*\}/g, "")
+          .trim();
+      }
+    }
 
     // Add assistant message to history
     const assistantMsg: OllamaMessage = {
       role: "assistant",
       content: result.content || undefined,
-      tool_calls: result.toolCalls.length > 0 ? result.toolCalls : undefined,
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
     messages.push(assistantMsg);
 
-    // No tool calls = we're done
-    if (result.toolCalls.length === 0) {
-      if (result.content) console.log(); // newline after streamed content
+    // No tool calls = we're done, print the response
+    if (toolCalls.length === 0) {
+      if (result.content) {
+        console.log(result.content);
+      }
       return result.content;
     }
 
+    // If there are tool calls, the text was just "thinking" - don't print it
+    // (small models often output planning text alongside tool calls)
+
     // Execute each tool call
     if (verbose) {
-      console.error(dim(`[${result.toolCalls.length} tool call(s)]`));
+      console.error(dim(`[${toolCalls.length} tool call(s)]`));
     }
 
-    for (const call of result.toolCalls) {
+    for (const call of toolCalls) {
       const name = call.function.name;
       const args = call.function.arguments ?? {};
 

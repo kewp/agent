@@ -101,8 +101,14 @@ Deno.test("search_files: no matches", async () => {
     console.log("  (skipped - ripgrep not installed)");
     return;
   }
-  const result = await executeTool("search_files", { query: "xyzzy123notfound456" });
-  assertEquals(result, "(no matches)");
+  // Search in a temp directory with no files
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const result = await executeTool("search_files", { query: "anything", path: tmpDir });
+    assertEquals(result, "(no matches)");
+  } finally {
+    await Deno.remove(tmpDir);
+  }
 });
 
 // ============================================================================
